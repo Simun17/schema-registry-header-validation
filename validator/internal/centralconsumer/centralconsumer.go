@@ -19,11 +19,11 @@ import (
 	"encoding/json"
 	"strconv"
 
+	"github.com/dataphos/lib-brokers/pkg/broker"
+	"github.com/dataphos/lib-logger/logger"
 	"github.com/dataphos/schema-registry-validator/internal/errtemplates"
 	"github.com/dataphos/schema-registry-validator/internal/janitor"
 	"github.com/dataphos/schema-registry-validator/internal/registry"
-	"github.com/dataphos/lib-brokers/pkg/broker"
-	"github.com/dataphos/lib-logger/logger"
 	"github.com/pkg/errors"
 )
 
@@ -286,6 +286,7 @@ func (cc *CentralConsumer) AsProcessor() *janitor.Processor {
 
 func (cc *CentralConsumer) Handle(ctx context.Context, message janitor.Message) (janitor.MessageTopicPair, error) {
 	var (
+		schema                []byte
 		messageSchemaPair     janitor.MessageSchemaPair
 		messageTopicPair      janitor.MessageTopicPair
 		specificSchemaVersion VersionDetails
@@ -293,14 +294,46 @@ func (cc *CentralConsumer) Handle(ctx context.Context, message janitor.Message) 
 		encryptedMessageData  []byte
 	)
 
-	if cc.mode == Default {
+	if message.RawAttributes[janitor.HeaderValidation] == "true" {
+		var (
+			headerId      string
+			headerVersion string
+			headerSchema  []byte
+		)
+
+		headerId, headerVersion, err = janitor.GetHeaderIdAndVersion(message)
+		if err != nil {
+			return janitor.MessageTopicPair{Message: message, Topic: cc.Router.Route(janitor.Deadletter, message)}, err
+		}
 		acquireIfSet(cc.registrySem)
-		messageSchemaPair, err = janitor.CollectSchema(ctx, message, cc.Registry)
+		headerSchema, err = janitor.CollectSchema(ctx, headerId, headerVersion, cc.Registry)
 		if err != nil {
 			setMessageRawAttributes(message, err, "Wrong compile")
 			releaseIfSet(cc.registrySem)
 			return janitor.MessageTopicPair{Message: message, Topic: cc.Router.Route(janitor.Deadletter, message)}, err
 		}
+		releaseIfSet(cc.registrySem)
+		messageSchemaPair = janitor.MessageSchemaPair{Message: message, Schema: headerSchema}
+
+		var isValid bool
+		isValid, err = janitor.ValidateHeader(message, headerSchema, cc.Validators)
+		if err != nil {
+			return janitor.MessageTopicPair{Message: message, Topic: cc.Router.Route(janitor.Deadletter, message)}, err
+		}
+		if !isValid {
+			return janitor.MessageTopicPair{Message: message, Topic: cc.Router.Route(janitor.Deadletter, message)}, nil
+		}
+	}
+
+	if cc.mode == Default {
+		acquireIfSet(cc.registrySem)
+		schema, err = janitor.CollectSchema(ctx, message.SchemaID, message.Version, cc.Registry)
+		if err != nil {
+			setMessageRawAttributes(message, err, "Wrong compile")
+			releaseIfSet(cc.registrySem)
+			return janitor.MessageTopicPair{Message: message, Topic: cc.Router.Route(janitor.Deadletter, message)}, err
+		}
+		messageSchemaPair = janitor.MessageSchemaPair{Message: message, Schema: schema}
 		releaseIfSet(cc.registrySem)
 
 		messageTopicPair, err = cc.getMessageTopicPair(messageSchemaPair, encryptedMessageData)
