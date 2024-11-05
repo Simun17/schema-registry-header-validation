@@ -133,12 +133,12 @@ func GetHeaderIdAndVersion(message Message) (string, string, error) {
 
 func ValidateHeader(message Message, schema []byte, validators Validators) (bool, error) {
 	if len(schema) == 0 {
-		errMissingSchema := errors.WithMessage(validator.ErrMissingSchema, "")
+		errMissingHeaderSchema := errors.WithMessage(validator.ErrMissingHeaderSchema, "")
 		message.RawAttributes["deadLetterErrorCategory"] = "Header schema error"
-		message.RawAttributes["deadLetterErrorReason"] = errMissingSchema.Error()
+		message.RawAttributes["deadLetterErrorReason"] = errMissingHeaderSchema.Error()
 		return false, nil
 	}
-	headerData, err := json.Marshal(message.RawAttributes)
+	headerData, err := generateHeaderData(message.RawAttributes)
 	if err != nil {
 		message.RawAttributes["deadLetterErrorCategory"] = "Header schema error"
 		message.RawAttributes["deadLetterErrorReason"] = err.Error()
@@ -158,7 +158,7 @@ func ValidateHeader(message Message, schema []byte, validators Validators) (bool
 	if err != nil {
 		if errors.Is(err, validator.ErrFailedValidation) {
 			message.RawAttributes["deadLetterErrorCategory"] = "Header validation error"
-			message.RawAttributes["deadLetterErrorReason"] = err.Error()
+			message.RawAttributes["deadLetterErrorReason"] = errors.WithMessage(validator.ErrFailedHeaderValidation, err.Error())
 			return false, nil
 		} else if errors.Is(err, validator.ErrDeadletter) {
 			return false, nil
