@@ -172,6 +172,23 @@ func ValidateHeader(message Message, schema []byte, validators Validators) (bool
 	return false, nil
 }
 
+func generateHeaderData(rawAttributes map[string]interface{}) ([]byte, error) {
+	cleanAttributes := make(map[string]interface{})
+	for key, value := range rawAttributes {
+		if key == HeaderValidation || key == AttributeHeaderID || key == AttributeHeaderVersion ||
+			key == AttributeSchemaID || key == AttributeSchemaVersion || key == AttributeFormat {
+			continue
+		} else {
+			cleanAttributes[key] = value
+		}
+	}
+	headerData, err := json.Marshal(cleanAttributes)
+	if err != nil {
+		return nil, err
+	}
+	return headerData, nil
+}
+
 // SchemaGenerators is a convenience type for a map containing schemagen.Generator instances for available message formats.
 type SchemaGenerators map[string]schemagen.Generator
 
