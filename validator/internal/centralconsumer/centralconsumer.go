@@ -24,6 +24,7 @@ import (
 	"github.com/dataphos/schema-registry-validator/internal/errtemplates"
 	"github.com/dataphos/schema-registry-validator/internal/janitor"
 	"github.com/dataphos/schema-registry-validator/internal/registry"
+	jsoninternal "github.com/dataphos/schema-registry-validator/internal/validator/json"
 	"github.com/pkg/errors"
 )
 
@@ -63,18 +64,19 @@ type VersionDetails struct {
 
 // CentralConsumer models the central consumer process.
 type CentralConsumer struct {
-	Registry      registry.SchemaRegistry
-	Validators    janitor.Validators
-	Router        janitor.Router
-	Publisher     broker.Publisher
-	topicIDs      Topics
-	topics        map[string]broker.Topic
-	registrySem   chan struct{}
-	validatorsSem chan struct{}
-	log           logger.Log
-	mode          Mode
-	schema        Schema
-	encryptionKey string
+	Registry        registry.SchemaRegistry
+	Validators      janitor.Validators
+	Router          janitor.Router
+	Publisher       broker.Publisher
+	topicIDs        Topics
+	topics          map[string]broker.Topic
+	registrySem     chan struct{}
+	validatorsSem   chan struct{}
+	log             logger.Log
+	mode            Mode
+	schema          Schema
+	encryptionKey   string
+	validateHeaders bool
 }
 
 // Settings holds settings concerning the concurrency limits for various stages of the central consumer pipeline.
@@ -84,6 +86,9 @@ type Settings struct {
 
 	// NumInferrers defines the maximum amount of inflight destination topic inference jobs (validation and routing).
 	NumInferrers int
+
+	// ValidateHeaders defines if the messages' headers will be validated
+	ValidateHeaders bool
 }
 
 // Topics defines the standard destination topics, based on validation results.
@@ -121,6 +126,13 @@ func New(registry registry.SchemaRegistry, publisher broker.Publisher, validator
 	var validatorsSem chan struct{}
 	if settings.NumInferrers > 0 {
 		validatorsSem = make(chan struct{}, settings.NumInferrers)
+	}
+	if settings.ValidateHeaders == true {
+		_, ok := validators["json"]
+		if !ok {
+			// if json validation is turned off, this version of json validator is used by default for validating message header
+			validators["json"] = jsoninternal.New()
+		}
 	}
 
 	var schemaReturned []byte
@@ -171,7 +183,8 @@ func New(registry registry.SchemaRegistry, publisher broker.Publisher, validator
 			},
 			Specification: schemaVersion.Specification,
 		},
-		encryptionKey: encryptionKey,
+		encryptionKey:   encryptionKey,
+		validateHeaders: settings.ValidateHeaders,
 	}, nil
 }
 
@@ -294,7 +307,8 @@ func (cc *CentralConsumer) Handle(ctx context.Context, message janitor.Message) 
 		encryptedMessageData  []byte
 	)
 
-	if message.RawAttributes[janitor.HeaderValidation] == "true" {
+	if message.RawAttributes[janitor.HeaderValidation] == "true" ||
+		(cc.validateHeaders == true && message.RawAttributes[janitor.HeaderValidation] != "false") {
 		var (
 			headerId      string
 			headerVersion string
