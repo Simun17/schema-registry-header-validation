@@ -307,8 +307,15 @@ func (cc *CentralConsumer) Handle(ctx context.Context, message janitor.Message) 
 		encryptedMessageData  []byte
 	)
 
+	// header validation is turned on if a message specifies so in the header OR if validateHeaders flag is set
+	// on the Validator level
 	if message.RawAttributes[janitor.HeaderValidation] == "true" ||
 		(cc.validateHeaders == true && message.RawAttributes[janitor.HeaderValidation] != "false") {
+		_, ok := cc.Validators["json"]
+		// it is possible json validator isn't initialized by this point so we are checking it just in case
+		if !ok {
+			cc.Validators["json"] = jsoninternal.New()
+		}
 		var (
 			headerId      string
 			headerVersion string
