@@ -3,7 +3,7 @@
 Repository of the Dataphos Schema Registry API.
 
 
-## Registry
+## Registry 
 
 The Registry, which itself is a database with a REST API on top, is deployed as a deployment on a Kubernetes cluster
 which supports the following:
